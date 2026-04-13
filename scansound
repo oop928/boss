@@ -1,10 +1,11 @@
 --[[
-    Script Name: 191
-    Description: Real-time AudioPlayer scanner with modern UI (Black & Red theme)
+    Script Name: 191 (AudioPlayer Scanner + Marketplace Info)
+    Theme: Black & Red
     Features:
-    - Continuously scans all players' AudioPlayers when toggled ON
-    - Shows song name, creator, ID, play status, and PLAYER NAME
-    - Preview, Copy ID/Name, Drag UI
+    - Toggle continuous scan for AudioPlayer & Sound
+    - Show song name, creator, ID, player name, status
+    - Preview, copy ID/Name
+    - Debug prints in console
 ]]
 
 local Players = game:GetService("Players")
@@ -13,35 +14,36 @@ local UserInputService = game:GetService("UserInputService")
 local MarketplaceService = game:GetService("MarketplaceService")
 local RunService = game:GetService("RunService")
 local SoundService = game:GetService("SoundService")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local Lighting = game:GetService("Lighting")
 
 local LocalPlayer = Players.LocalPlayer
 local PlayerGui = LocalPlayer:WaitForChild("PlayerGui")
 
--- // 1. UI Setup //
+-- // UI Setup //
 local ScreenGui = Instance.new("ScreenGui")
 ScreenGui.Name = "191_MainUI"
 ScreenGui.ResetOnSpawn = false
 ScreenGui.Parent = PlayerGui
 
--- // 2. Colors (Black & Red Theme) //
+-- // Colors (Black & Red) //
 local COLORS = {
-    Background = Color3.fromRGB(10, 10, 10),        -- Almost black
-    Sidebar = Color3.fromRGB(25, 25, 25),           -- Dark gray
-    Accent = Color3.fromRGB(200, 30, 30),           -- Strong red
-    Success = Color3.fromRGB(34, 197, 94),          -- Green (for playing)
-    Stop = Color3.fromRGB(239, 68, 68),             -- Red (stop button)
+    Background = Color3.fromRGB(10, 10, 10),
+    Sidebar = Color3.fromRGB(25, 25, 25),
+    Accent = Color3.fromRGB(200, 30, 30),
+    Success = Color3.fromRGB(34, 197, 94),
+    Stop = Color3.fromRGB(239, 68, 68),
     Text = Color3.fromRGB(240, 240, 240),
     TextDim = Color3.fromRGB(150, 150, 150),
     ItemBG = Color3.fromRGB(30, 30, 30)
 }
 
--- // 3. State //
+-- // State //
 local currentPreviewSound = nil
-local isScanningActive = false       -- Toggle state
+local isScanningActive = false
 local scanLoopConnection = nil
-local soundObjectsCache = {}         -- To avoid re-scanning same AudioPlayer
 
--- // 4. Helper Functions //
+-- // Helper Functions //
 local function AddCorner(parent, radius)
     local corner = Instance.new("UICorner")
     corner.CornerRadius = UDim.new(0, radius or 8)
@@ -55,7 +57,7 @@ local function SmartCopy(text)
     return false
 end
 
--- // 5. Open Button //
+-- // Open Button //
 local OpenBtn = Instance.new("TextButton")
 OpenBtn.Name = "OpenButton"
 OpenBtn.Text = "191"
@@ -69,7 +71,7 @@ OpenBtn.Visible = false
 OpenBtn.Parent = ScreenGui
 AddCorner(OpenBtn, 8)
 
--- // 6. Main Frame //
+-- // Main Frame //
 local MainFrame = Instance.new("Frame")
 MainFrame.Name = "MainFrame"
 MainFrame.Size = UDim2.new(0, 650, 0, 480)
@@ -87,12 +89,10 @@ Stroke.Transparency = 0.5
 Stroke.Thickness = 1.5
 Stroke.Parent = MainFrame
 
--- Toggle UI
 local function ToggleMenu()
     if MainFrame.Visible then
         MainFrame.Visible = false
         OpenBtn.Visible = true
-        -- Stop preview if any
         if currentPreviewSound then currentPreviewSound:Stop() end
     else
         OpenBtn.Visible = false
@@ -102,7 +102,7 @@ end
 
 OpenBtn.MouseButton1Click:Connect(ToggleMenu)
 
--- // 7. Header (Drag & Title) //
+-- // Header //
 local Header = Instance.new("Frame")
 Header.Size = UDim2.new(1, 0, 0, 45)
 Header.BackgroundColor3 = COLORS.Sidebar
@@ -142,13 +142,10 @@ AddCorner(CloseBtn, 8)
 CloseBtn.MouseButton1Click:Connect(function()
     ToggleMenu()
     if currentPreviewSound then currentPreviewSound:Stop() end
-    -- Also stop scanning if active
-    if isScanningActive then
-        ToggleScan()
-    end
+    if isScanningActive then ToggleScan() end
 end)
 
--- // 8. Control Bar (Only Toggle Button) //
+-- // Control Bar //
 local ControlBar = Instance.new("Frame")
 ControlBar.Size = UDim2.new(1, -20, 0, 45)
 ControlBar.Position = UDim2.new(0, 10, 0, 55)
@@ -166,7 +163,7 @@ ScanToggleBtn.TextColor3 = Color3.new(1,1,1)
 ScanToggleBtn.Parent = ControlBar
 AddCorner(ScanToggleBtn, 8)
 
--- // 9. Results List (Scrolling Frame) //
+-- // Results List //
 local ListContainer = Instance.new("ScrollingFrame")
 ListContainer.Size = UDim2.new(1, -20, 1, -110)
 ListContainer.Position = UDim2.new(0, 10, 0, 110)
@@ -182,14 +179,13 @@ ListLayout.Padding = UDim.new(0, 8)
 ListLayout.SortOrder = Enum.SortOrder.LayoutOrder
 ListLayout.Parent = ListContainer
 
--- // 10. Clear List Function //
 local function ClearSongList()
     for _, child in pairs(ListContainer:GetChildren()) do
         if child:IsA("Frame") then child:Destroy() end
     end
 end
 
--- // 11. Create Music Card (Updated with Player Name) //
+-- // Music Card Creator //
 local function CreateMusicCard(audioPlayer, assetInfo, playerName)
     local card = Instance.new("Frame")
     card.Size = UDim2.new(1, -6, 0, 100)
@@ -199,7 +195,6 @@ local function CreateMusicCard(audioPlayer, assetInfo, playerName)
 
     local cleanID = audioPlayer.SoundId:match("%d+") or "0"
 
-    -- Cover Image
     local Cover = Instance.new("ImageLabel")
     Cover.Size = UDim2.new(0, 75, 0, 75)
     Cover.Position = UDim2.new(0, 10, 0, 12)
@@ -208,7 +203,6 @@ local function CreateMusicCard(audioPlayer, assetInfo, playerName)
     Cover.Parent = card
     AddCorner(Cover, 8)
 
-    -- Status (Playing/Idle)
     local StatusLabel = Instance.new("TextLabel")
     StatusLabel.Font = Enum.Font.GothamBlack
     StatusLabel.TextSize = 10
@@ -226,7 +220,6 @@ local function CreateMusicCard(audioPlayer, assetInfo, playerName)
         StatusLabel.TextColor3 = COLORS.TextDim
     end
 
-    -- Song Name
     local SongName = Instance.new("TextBox")
     SongName.Text = assetInfo and assetInfo.Name or "Unknown Song"
     SongName.Size = UDim2.new(1, -200, 0, 20)
@@ -240,7 +233,6 @@ local function CreateMusicCard(audioPlayer, assetInfo, playerName)
     SongName.ClearTextOnFocus = false
     SongName.Parent = card
 
-    -- Creator
     local CreatorName = Instance.new("TextLabel")
     CreatorName.Text = "By: " .. (assetInfo and assetInfo.Creator.Name or "Unknown")
     CreatorName.Size = UDim2.new(1, -200, 0, 16)
@@ -252,7 +244,6 @@ local function CreateMusicCard(audioPlayer, assetInfo, playerName)
     CreatorName.TextXAlignment = Enum.TextXAlignment.Left
     CreatorName.Parent = card
 
-    -- Playing By (Player Name) - NEW
     local PlayerLabel = Instance.new("TextLabel")
     PlayerLabel.Text = "🎧 " .. playerName
     PlayerLabel.Size = UDim2.new(0, 150, 0, 16)
@@ -264,7 +255,6 @@ local function CreateMusicCard(audioPlayer, assetInfo, playerName)
     PlayerLabel.TextXAlignment = Enum.TextXAlignment.Left
     PlayerLabel.Parent = card
 
-    -- ID Box
     local IDBox = Instance.new("TextBox")
     IDBox.Text = cleanID
     IDBox.Size = UDim2.new(0, 90, 0, 22)
@@ -278,7 +268,6 @@ local function CreateMusicCard(audioPlayer, assetInfo, playerName)
     IDBox.Parent = card
     AddCorner(IDBox, 6)
 
-    -- Copy ID Button
     local CopyIDBtn = Instance.new("TextButton")
     CopyIDBtn.Text = "COPY ID"
     CopyIDBtn.Size = UDim2.new(0, 60, 0, 22)
@@ -303,7 +292,6 @@ local function CreateMusicCard(audioPlayer, assetInfo, playerName)
         CopyIDBtn.Text = "COPY ID"
     end)
 
-    -- Copy Name Button
     local CopyNameBtn = Instance.new("TextButton")
     CopyNameBtn.Text = "NAME"
     CopyNameBtn.Size = UDim2.new(0, 50, 0, 22)
@@ -328,7 +316,6 @@ local function CreateMusicCard(audioPlayer, assetInfo, playerName)
         CopyNameBtn.Text = "NAME"
     end)
 
-    -- Play Button
     local PlayBtn = Instance.new("TextButton")
     PlayBtn.Text = "▶"
     PlayBtn.Size = UDim2.new(0, 40, 0, 40)
@@ -381,77 +368,122 @@ local function CreateMusicCard(audioPlayer, assetInfo, playerName)
     end)
 end
 
--- // 12. Scan Logic (Continuous) //
-local function ScanAllAudioPlayers()
+-- // Scan Function (Expanded) //
+local function ScanAllSounds()
     local found = {}
     local playerList = Players:GetPlayers()
     
-    for _, player in ipairs(playerList) do
-        if player.Character then
-            local character = player.Character
-            -- Search AudioPlayer in Character and PlayerGui
-            local containers = {character, player:FindFirstChild("PlayerGui")}
-            for _, container in ipairs(containers) do
-                if container then
-                    for _, obj in ipairs(container:GetDescendants()) do
-                        if obj:IsA("AudioPlayer") and obj.SoundId ~= "" then
-                            table.insert(found, {player = player, audio = obj})
+    -- Map character to player
+    local playerCharMap = {}
+    for _, plr in ipairs(playerList) do
+        if plr.Character then
+            playerCharMap[plr.Character] = plr
+        end
+    end
+    
+    -- Search everywhere
+    local searchContainers = {
+        workspace,
+        SoundService,
+        ReplicatedStorage,
+        Lighting,
+        LocalPlayer:WaitForChild("PlayerScripts"),
+        LocalPlayer:WaitForChild("PlayerGui")
+    }
+    
+    for _, plr in ipairs(playerList) do
+        if plr ~= LocalPlayer then
+            if plr.Character then
+                table.insert(searchContainers, plr.Character)
+            end
+            local pg = plr:FindFirstChild("PlayerGui")
+            if pg then table.insert(searchContainers, pg) end
+            local ps = plr:FindFirstChild("PlayerScripts")
+            if ps then table.insert(searchContainers, ps) end
+        end
+    end
+    
+    -- Scan
+    for _, container in ipairs(searchContainers) do
+        pcall(function()
+            for _, obj in ipairs(container:GetDescendants()) do
+                if (obj:IsA("Sound") or obj:IsA("AudioPlayer")) and obj.SoundId ~= "" then
+                    local cleanID = obj.SoundId:match("%d+")
+                    if cleanID and #cleanID > 3 then
+                        -- Find owner player
+                        local ownerPlayer = nil
+                        local current = obj
+                        while current and current.Parent do
+                            if playerCharMap[current] then
+                                ownerPlayer = playerCharMap[current]
+                                break
+                            end
+                            current = current.Parent
                         end
+                        ownerPlayer = ownerPlayer or { Name = "Server/Ambient" }
+                        
+                        table.insert(found, {
+                            player = ownerPlayer,
+                            audio = obj
+                        })
                     end
                 end
             end
-        end
+        end)
     end
+    
     return found
 end
 
 local function RefreshDisplay()
     ClearSongList()
-    local audioPlayers = ScanAllAudioPlayers()
+    local soundList = ScanAllSounds()
     
-    for _, data in ipairs(audioPlayers) do
-        local audio = data.audio
-        local player = data.player
-        local assetId = tonumber(audio.SoundId:match("%d+"))
-        
-        if assetId then
-            local success, info = pcall(function()
-                return MarketplaceService:GetProductInfo(assetId)
-            end)
-            if success and info and info.AssetTypeId == 3 then
-                CreateMusicCard(audio, info, player.Name)
-            else
-                CreateMusicCard(audio, {Name = "Unknown", Creator = {Name = "-"}}, player.Name)
-            end
-        end
-    end
+    print("[191] Scan result: " .. #soundList .. " sounds found.")
     
-    if #audioPlayers == 0 then
-        -- Show empty state
+    if #soundList == 0 then
         local emptyLabel = Instance.new("TextLabel")
-        emptyLabel.Text = "No AudioPlayer found"
+        emptyLabel.Text = "No AudioPlayer / Sound found"
         emptyLabel.Size = UDim2.new(1, 0, 0, 30)
         emptyLabel.BackgroundTransparency = 1
         emptyLabel.TextColor3 = COLORS.TextDim
         emptyLabel.Font = Enum.Font.Gotham
         emptyLabel.TextSize = 14
         emptyLabel.Parent = ListContainer
+        return
+    end
+    
+    for _, data in ipairs(soundList) do
+        local audio = data.audio
+        local player = data.player
+        local assetId = tonumber(audio.SoundId:match("%d+"))
+        
+        if assetId then
+            print("[191] Fetching info for ID: " .. assetId)
+            local success, info = pcall(function()
+                return MarketplaceService:GetProductInfo(assetId)
+            end)
+            if success and info then
+                -- No AssetTypeId filtering to ensure all audio IDs show up
+                CreateMusicCard(audio, info, player.Name)
+                print("[191] Added: " .. info.Name .. " by " .. info.Creator.Name)
+            else
+                CreateMusicCard(audio, {Name = "Unknown (Failed to fetch)", Creator = {Name = "-"}}, player.Name)
+                print("[191] Failed to fetch info for ID: " .. assetId)
+            end
+        end
     end
 end
 
--- Continuous scanning loop
+-- // Scan Loop //
 local function StartScanLoop()
     if scanLoopConnection then scanLoopConnection:Disconnect() end
     scanLoopConnection = RunService.Heartbeat:Connect(function()
         if isScanningActive then
-            -- Refresh display at reasonable rate (every ~2 seconds to save performance)
-            -- Using a simple debounce
-            if not scanLoopConnection then return end
             RefreshDisplay()
-            task.wait(2)  -- Wait 2 seconds between scans
+            task.wait(2.5) -- scan interval
         end
     end)
-    -- Immediately run first scan
     task.spawn(RefreshDisplay)
 end
 
@@ -471,7 +503,6 @@ local function StopScanLoop()
     emptyLabel.Parent = ListContainer
 end
 
--- // 13. Toggle Function //
 function ToggleScan()
     isScanningActive = not isScanningActive
     if isScanningActive then
@@ -487,7 +518,7 @@ end
 
 ScanToggleBtn.MouseButton1Click:Connect(ToggleScan)
 
--- // 14. Drag Functionality //
+-- // Drag //
 local dragging, dragInput, dragStart, startPos
 
 local function updateDrag(input)
@@ -521,25 +552,19 @@ UserInputService.InputChanged:Connect(function(input)
     end
 end)
 
--- // 15. Hotkey (Right Ctrl) //
+-- // Hotkey //
 UserInputService.InputBegan:Connect(function(input, gameProcessed)
     if input.KeyCode == Enum.KeyCode.RightControl and not gameProcessed then
         ToggleMenu()
     end
 end)
 
--- // 16. Cleanup on close //
 MainFrame:GetPropertyChangedSignal("Visible"):Connect(function()
     if not MainFrame.Visible then
-        -- Stop scanning if visible is hidden
-        if isScanningActive then
-            ToggleScan()
-        end
-        if currentPreviewSound then
-            currentPreviewSound:Stop()
-        end
+        if isScanningActive then ToggleScan() end
+        if currentPreviewSound then currentPreviewSound:Stop() end
     end
 end)
 
--- Show open button initially
 OpenBtn.Visible = true
+print("[191] Script loaded. Press 191 button to open.")
